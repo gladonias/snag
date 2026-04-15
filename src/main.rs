@@ -12,6 +12,40 @@ mod select;
 mod wayland;
 mod x11;
 
+use error::SnagError;
+
+fn run() -> Result<String, SnagError> {
+    let lang = "eng";
+
+    let capture = if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        // Wayland path — stub for now
+        return Err(SnagError::ProtocolUnsupported);
+    } else if std::env::var("DISPLAY").is_ok() {
+        x11::run()?
+    } else {
+        return Err(SnagError::NoDisplayServer);
+    };
+
+    let engine = ocr::OcrEngine::new(lang)?;
+    engine.extract(
+        &capture.pixels,
+        capture.width,
+        capture.height,
+        capture.bytes_per_pixel,
+    )
+}
+
 fn main() {
-    // TODO: CLI args, session detection, dispatch
+    match run() {
+        Ok(text) => {
+            print!("{}", text);
+        }
+        Err(SnagError::SelectionCancelled) => {
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("snag: {}", e);
+            std::process::exit(2);
+        }
+    }
 }
