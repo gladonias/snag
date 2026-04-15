@@ -27,16 +27,12 @@ enum PortalResponse {
 
 /// Run the portal screenshot pipeline.
 pub fn run() -> Result<CaptureResult, SnagError> {
-    let conn =
-        Connection::new_session().map_err(|e| SnagError::PortalError(e.to_string()))?;
+    let conn = Connection::new_session().map_err(|e| SnagError::PortalError(e.to_string()))?;
 
     let handle_token = format!("snag_{}", std::process::id());
 
     // Build the request object path from our sender name
-    let sender = conn
-        .unique_name()
-        .trim_start_matches(':')
-        .replace('.', "_");
+    let sender = conn.unique_name().trim_start_matches(':').replace('.', "_");
     let request_path = format!(
         "/org/freedesktop/portal/desktop/request/{}/{}",
         sender, handle_token
@@ -47,8 +43,7 @@ pub fn run() -> Result<CaptureResult, SnagError> {
     let result_clone = result.clone();
 
     // Register signal handler before making the call
-    let rule = MatchRule::new_signal(REQUEST_IFACE, "Response")
-        .with_path(request_path.clone());
+    let rule = MatchRule::new_signal(REQUEST_IFACE, "Response").with_path(request_path.clone());
     conn.add_match(rule, move |_: (), _conn, msg: &dbus::Message| {
         let response = parse_response(msg);
         if let Ok(mut lock) = result_clone.lock() {

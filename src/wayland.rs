@@ -12,17 +12,14 @@ use wayland_client::protocol::{
     wl_shm_pool, wl_surface,
 };
 use wayland_client::{delegate_noop, Connection, Dispatch, QueueHandle, WEnum};
-use wayland_protocols_wlr::layer_shell::v1::client::{
-    zwlr_layer_shell_v1, zwlr_layer_surface_v1,
-};
+use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
 };
 
 /// Run the wlroots Wayland selection + capture pipeline.
 pub fn run() -> Result<CaptureResult, SnagError> {
-    let conn =
-        Connection::connect_to_env().map_err(|e| SnagError::WaylandError(e.to_string()))?;
+    let conn = Connection::connect_to_env().map_err(|e| SnagError::WaylandError(e.to_string()))?;
     let mut event_queue = conn.new_event_queue::<State>();
     let qh = event_queue.handle();
 
@@ -68,9 +65,7 @@ pub fn run() -> Result<CaptureResult, SnagError> {
         .map_err(|e| SnagError::WaylandError(e.to_string()))?;
 
     // Use first output dimensions (or fallback)
-    let (out_width, out_height) = state
-        .output_size
-        .unwrap_or((1920, 1080));
+    let (out_width, out_height) = state.output_size.unwrap_or((1920, 1080));
 
     // Create the overlay surface
     let surface = compositor.create_surface(&qh, ());
@@ -90,9 +85,8 @@ pub fn run() -> Result<CaptureResult, SnagError> {
             | zwlr_layer_surface_v1::Anchor::Right,
     );
     layer_surface.set_exclusive_zone(-1);
-    layer_surface.set_keyboard_interactivity(
-        zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive,
-    );
+    layer_surface
+        .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
     surface.commit();
 
     state.surface = Some(surface.clone());
@@ -179,9 +173,10 @@ pub fn run() -> Result<CaptureResult, SnagError> {
         return Err(SnagError::WaylandError("Screencopy failed".into()));
     }
 
-    let frame_info = state.frame_info.as_ref().ok_or_else(|| {
-        SnagError::WaylandError("No frame info received".into())
-    })?;
+    let frame_info = state
+        .frame_info
+        .as_ref()
+        .ok_or_else(|| SnagError::WaylandError("No frame info received".into()))?;
 
     let buf_width = frame_info.width;
     let buf_height = frame_info.height;
@@ -247,8 +242,7 @@ pub fn run() -> Result<CaptureResult, SnagError> {
         return Err(SnagError::WaylandError("mmap failed".into()));
     }
 
-    let raw_pixels =
-        unsafe { std::slice::from_raw_parts(mmap as *const u8, buf_size) };
+    let raw_pixels = unsafe { std::slice::from_raw_parts(mmap as *const u8, buf_size) };
 
     // Convert BGRA/BGRX to RGB for Tesseract
     let pixel_count = (buf_width * buf_height) as usize;
@@ -259,7 +253,7 @@ pub fn run() -> Result<CaptureResult, SnagError> {
             let offset = row_start + x * 4;
             rgb.push(raw_pixels[offset + 2]); // R
             rgb.push(raw_pixels[offset + 1]); // G
-            rgb.push(raw_pixels[offset]);     // B
+            rgb.push(raw_pixels[offset]); // B
         }
     }
 
@@ -291,25 +285,23 @@ fn normalize_selection(state: &State) -> (i32, i32, u32, u32) {
     let y = y1.min(y2);
     let w = (x1 - x2).unsigned_abs();
     let h = (y1 - y2).unsigned_abs();
-    (x as i32, y as i32, w as u32, h as u32)
+    (x, y, w, h)
 }
 
 fn create_shm_file(size: usize) -> Result<std::fs::File, SnagError> {
     use std::io::Seek;
-    let mut file = tempfile().map_err(|e| SnagError::IoError(e))?;
-    file.set_len(size as u64)
-        .map_err(|e| SnagError::IoError(e))?;
+    let mut file = tempfile().map_err(SnagError::IoError)?;
+    file.set_len(size as u64).map_err(SnagError::IoError)?;
     file.seek(std::io::SeekFrom::Start(0))
-        .map_err(|e| SnagError::IoError(e))?;
+        .map_err(SnagError::IoError)?;
     // Zero-fill is handled by ftruncate on Linux
     Ok(file)
 }
 
 fn tempfile() -> Result<std::fs::File, std::io::Error> {
     // Use memfd_create if available, otherwise tmpfile
-    let name = std::ffi::CString::new("snag-shm").map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::Other, "CString error")
-    })?;
+    let name =
+        std::ffi::CString::new("snag-shm").map_err(|_| std::io::Error::other("CString error"))?;
     let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
     if fd < 0 {
         return Err(std::io::Error::last_os_error());
@@ -345,8 +337,7 @@ fn draw_overlay(state: &mut State, qh: &QueueHandle<State>) -> Result<(), SnagEr
         return Err(SnagError::WaylandError("mmap failed".into()));
     }
 
-    let pixels =
-        unsafe { std::slice::from_raw_parts_mut(mmap as *mut u8, size) };
+    let pixels = unsafe { std::slice::from_raw_parts_mut(mmap as *mut u8, size) };
 
     // Fill with semi-transparent dark overlay (ARGB8888)
     let overlay_color: [u8; 4] = [0x00, 0x00, 0x00, 0x60]; // B G R A
@@ -367,7 +358,7 @@ fn draw_overlay(state: &mut State, qh: &QueueHandle<State>) -> Result<(), SnagEr
             for x in sx..sx.saturating_add(sw).min(width) {
                 let offset = ((y * stride) + x * 4) as usize;
                 if offset + 3 < size {
-                    pixels[offset] = 0x00;     // B
+                    pixels[offset] = 0x00; // B
                     pixels[offset + 1] = 0x00; // G
                     pixels[offset + 2] = 0x00; // R
                     pixels[offset + 3] = 0x10; // A (nearly transparent)
@@ -534,13 +525,19 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         qh: &QueueHandle<Self>,
     ) {
         if let wl_registry::Event::Global {
-            name, interface, version,
+            name,
+            interface,
+            version,
         } = event
         {
             match &interface[..] {
                 "wl_compositor" => {
-                    state.compositor =
-                        Some(registry.bind::<wl_compositor::WlCompositor, _, _>(name, version.min(4), qh, ()));
+                    state.compositor = Some(registry.bind::<wl_compositor::WlCompositor, _, _>(
+                        name,
+                        version.min(4),
+                        qh,
+                        (),
+                    ));
                 }
                 "wl_shm" => {
                     state.shm =
@@ -566,13 +563,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 }
                 "zwlr_screencopy_manager_v1" => {
                     state.screencopy_manager = Some(
-                        registry
-                            .bind::<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, _, _>(
-                                name,
-                                version.min(3),
-                                qh,
-                                (),
-                            ),
+                        registry.bind::<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, _, _>(
+                            name,
+                            version.min(3),
+                            qh,
+                            (),
+                        ),
                     );
                 }
                 _ => {}
@@ -590,11 +586,15 @@ impl Dispatch<wl_output::WlOutput, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_output::Event::Mode { width, height, flags, .. } = event {
-            if let WEnum::Value(flags) = flags {
-                if flags.contains(wl_output::Mode::Current) {
-                    state.output_size = Some((width as u32, height as u32));
-                }
+        if let wl_output::Event::Mode {
+            width,
+            height,
+            flags: WEnum::Value(flags),
+            ..
+        } = event
+        {
+            if flags.contains(wl_output::Mode::Current) {
+                state.output_size = Some((width as u32, height as u32));
             }
         }
     }
@@ -735,19 +735,17 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, ()> for State {
     ) {
         match event {
             zwlr_screencopy_frame_v1::Event::Buffer {
-                format,
+                format: WEnum::Value(fmt),
                 width,
                 height,
                 stride,
             } => {
-                if let WEnum::Value(fmt) = format {
-                    state.frame_info = Some(FrameInfo {
-                        format: fmt as u32,
-                        width,
-                        height,
-                        stride,
-                    });
-                }
+                state.frame_info = Some(FrameInfo {
+                    format: fmt as u32,
+                    width,
+                    height,
+                    stride,
+                });
             }
             zwlr_screencopy_frame_v1::Event::Ready { .. } => {
                 state.screencopy_done = true;
