@@ -28,14 +28,14 @@ fn run() -> Result<String, SnagError> {
             match wayland::run() {
                 Ok(result) => result,
                 Err(SnagError::ProtocolUnsupported) => {
-                    // Fall back to portal path
-                    return Err(SnagError::ProtocolUnsupported);
+                    // wlroots compositor missing screencopy — fall back to portal
+                    portal::run()?
                 }
                 Err(e) => return Err(e),
             }
         } else {
-            // Non-wlroots Wayland (KDE, GNOME) — portal path stub
-            return Err(SnagError::ProtocolUnsupported);
+            // Non-wlroots Wayland (KDE, GNOME) — use portal path
+            portal::run()?
         }
     } else if std::env::var("DISPLAY").is_ok() {
         x11::run()?
