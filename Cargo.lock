@@ -499,6 +499,7 @@ dependencies = [
  "clap",
  "dbus",
  "leptess",
+ "libc",
  "thiserror",
  "wayland-client",
  "wayland-protocols",

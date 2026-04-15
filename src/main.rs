@@ -18,8 +18,25 @@ fn run() -> Result<String, SnagError> {
     let lang = "eng";
 
     let capture = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        // Wayland path — stub for now
-        return Err(SnagError::ProtocolUnsupported);
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        let is_wlroots = matches!(
+            desktop.to_lowercase().as_str(),
+            "hyprland" | "sway" | "wlroots"
+        );
+
+        if is_wlroots {
+            match wayland::run() {
+                Ok(result) => result,
+                Err(SnagError::ProtocolUnsupported) => {
+                    // Fall back to portal path
+                    return Err(SnagError::ProtocolUnsupported);
+                }
+                Err(e) => return Err(e),
+            }
+        } else {
+            // Non-wlroots Wayland (KDE, GNOME) — portal path stub
+            return Err(SnagError::ProtocolUnsupported);
+        }
     } else if std::env::var("DISPLAY").is_ok() {
         x11::run()?
     } else {

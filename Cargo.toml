@@ -19,5 +19,6 @@ wayland-protocols-wlr = { version = "0.2", features = ["client"] }
 wayland-protocols = { version = "0.31", features = ["client", "staging"] }
 x11rb = { version = "0.13", features = ["cursor", "shm", "image", "allow-unsafe-code"] }
 dbus = "0.9"
+libc = "0.2"
 
 [dev-dependencies]
