@@ -1,6 +1,6 @@
 [package]
 name = "snag"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Screen OCR tool for Linux — draw a selection, extract text to stdout"
 license = "AGPL-3.0"
