@@ -190,7 +190,10 @@ pub fn run() -> Result<CaptureResult, SnagError> {
         .ok_or_else(|| SnagError::WaylandError("wl_shm not found".into()))?
         .clone();
 
-    let buf_size = (buf_stride * buf_height) as usize;
+    let buf_size = buf_stride
+        .checked_mul(buf_height)
+        .ok_or_else(|| SnagError::WaylandError("Buffer size overflow".into()))?
+        as usize;
     let file = create_shm_file(buf_size)?;
     let pool = shm.create_pool(file.as_fd(), buf_size as i32, &qh, ());
     let buffer = pool.create_buffer(
@@ -244,6 +247,11 @@ pub fn run() -> Result<CaptureResult, SnagError> {
 
     let raw_pixels = unsafe { std::slice::from_raw_parts(mmap as *const u8, buf_size) };
 
+    if buf_stride < buf_width * 4 {
+        unsafe { libc::munmap(mmap, buf_size); }
+        return Err(SnagError::WaylandError("Invalid stride: smaller than width * 4".into()));
+    }
+
     // Convert BGRA/BGRX to RGB for Tesseract
     let pixel_count = (buf_width * buf_height) as usize;
     let mut rgb = Vec::with_capacity(pixel_count * 3);
@@ -251,6 +259,9 @@ pub fn run() -> Result<CaptureResult, SnagError> {
         let row_start = y * buf_stride as usize;
         for x in 0..buf_width as usize {
             let offset = row_start + x * 4;
+            if offset + 2 >= buf_size {
+                break;
+            }
             rgb.push(raw_pixels[offset + 2]); // R
             rgb.push(raw_pixels[offset + 1]); // G
             rgb.push(raw_pixels[offset]); // B
@@ -312,8 +323,13 @@ fn tempfile() -> Result<std::fs::File, std::io::Error> {
 fn draw_overlay(state: &mut State, qh: &QueueHandle<State>) -> Result<(), SnagError> {
     let width = state.overlay_width;
     let height = state.overlay_height;
-    let stride = width * 4;
-    let size = (stride * height) as usize;
+    let stride = width
+        .checked_mul(4)
+        .ok_or_else(|| SnagError::WaylandError("Overlay stride overflow".into()))?;
+    let size = stride
+        .checked_mul(height)
+        .ok_or_else(|| SnagError::WaylandError("Overlay buffer size overflow".into()))?
+        as usize;
 
     let file = create_shm_file(size)?;
     let shm = state
@@ -468,6 +484,7 @@ struct State {
     cancelled: bool,
     dragging: bool,
     needs_redraw: bool,
+    pointer_initialized: bool,
     sel_start_x: i32,
     sel_start_y: i32,
     sel_end_x: i32,
@@ -501,6 +518,7 @@ impl State {
             cancelled: false,
             dragging: false,
             needs_redraw: false,
+            pointer_initialized: false,
             sel_start_x: 0,
             sel_start_y: 0,
             sel_end_x: 0,
@@ -644,8 +662,10 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
                     0x110 => {
                         if pressed {
                             state.dragging = true;
-                            state.sel_start_x = state.sel_end_x;
-                            state.sel_start_y = state.sel_end_y;
+                            if state.pointer_initialized {
+                                state.sel_start_x = state.sel_end_x;
+                                state.sel_start_y = state.sel_end_y;
+                            }
                         } else if state.dragging {
                             state.dragging = false;
                             state.selection_done = true;
@@ -667,6 +687,11 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
             } => {
                 let x = surface_x as i32;
                 let y = surface_y as i32;
+                if !state.pointer_initialized {
+                    state.sel_start_x = x;
+                    state.sel_start_y = y;
+                    state.pointer_initialized = true;
+                }
                 state.sel_end_x = x;
                 state.sel_end_y = y;
                 if state.dragging {

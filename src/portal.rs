@@ -118,13 +118,26 @@ fn decode_screenshot(file_uri: &str) -> Result<CaptureResult, SnagError> {
     // Read and decode the image
     let img = image::open(file_path)
         .map_err(|e| SnagError::PortalError(format!("Failed to decode image: {}", e)))?;
+
+    let (width, height) = (img.width(), img.height());
+    const MAX_PIXELS: u32 = 50_000_000;
+    if width.saturating_mul(height) > MAX_PIXELS {
+        return Err(SnagError::PortalError("Portal image too large".into()));
+    }
+
     let rgb_img = img.to_rgb8();
-    let width = rgb_img.width();
-    let height = rgb_img.height();
     let pixels = rgb_img.into_raw();
 
-    // Clean up the temp file
-    let _ = std::fs::remove_file(file_path);
+    // Only remove files from temp directories
+    let path = std::path::Path::new(file_path);
+    let is_temp = path.starts_with("/tmp")
+        || path.starts_with(std::env::temp_dir())
+        || std::env::var("XDG_RUNTIME_DIR")
+            .map(|dir| path.starts_with(&dir))
+            .unwrap_or(false);
+    if is_temp {
+        let _ = std::fs::remove_file(file_path);
+    }
 
     Ok(CaptureResult {
         pixels,
