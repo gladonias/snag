@@ -129,11 +129,15 @@ fn run_selection_loop(
     let mut start_y: i16 = 0;
     let mut dragging = false;
     let mut last_rect: Option<(i16, i16, u16, u16)> = None;
+    let mut pending_event: Option<Event> = None;
 
     loop {
-        let event = conn
-            .wait_for_event()
-            .map_err(|e| SnagError::X11Error(e.to_string()))?;
+        let event = if let Some(ev) = pending_event.take() {
+            ev
+        } else {
+            conn.wait_for_event()
+                .map_err(|e| SnagError::X11Error(e.to_string()))?
+        };
 
         match event {
             Event::ButtonPress(ev) => {
@@ -149,9 +153,21 @@ fn run_selection_loop(
                 start_y = ev.root_y;
                 dragging = true;
             }
-            Event::MotionNotify(ev) => {
+            Event::MotionNotify(mut ev) => {
                 if !dragging {
                     continue;
+                }
+                // Drain queued motion events to avoid flickering
+                while let Some(next) = conn
+                    .poll_for_event()
+                    .map_err(|e| SnagError::X11Error(e.to_string()))?
+                {
+                    if let Event::MotionNotify(newer) = next {
+                        ev = newer;
+                    } else {
+                        pending_event = Some(next);
+                        break;
+                    }
                 }
                 // Erase the old rectangle
                 if let Some((rx, ry, rw, rh)) = last_rect {
