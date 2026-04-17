@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-04-17
+
+### Fixed
+
+- Integer overflow in Wayland buffer size calculations using checked arithmetic
+- Selection starting at (0,0) instead of actual cursor position when clicking without prior mouse movement
+- Out-of-bounds reads in Wayland pixel conversion by validating stride and adding bounds checks
+- Arbitrary file deletion via unsanitized portal screenshot file paths; now restricted to temp directories
+- OOM from oversized portal images by rejecting screenshots exceeding 50MP
+- Wrong-monitor capture on multi-monitor setups; overlay now targets the focused output and screencopy uses the active output via wl_surface::enter tracking
+- Incorrect capture region on HiDPI displays by applying output scale factors to screencopy coordinates
+- OCR postprocessing producing extra blank lines due to off-by-one in the collapsing logic
+- Portal signal handler silently dropping results on mutex poisoning
+
 ## [0.1.0] - 2026-04-15
 
 ### Added
