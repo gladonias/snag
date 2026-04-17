@@ -73,19 +73,21 @@ impl OcrEngine {
 fn postprocess(text: &str) -> String {
     let trimmed = text.trim();
     let mut result = String::with_capacity(trimmed.len());
-    let mut consecutive_blank = 0;
+    let mut consecutive_blank = 0u32;
+    let mut first = true;
 
     for line in trimmed.lines() {
         if line.trim().is_empty() {
             consecutive_blank += 1;
-            if consecutive_blank <= 2 {
-                result.push('\n');
-            }
         } else {
-            consecutive_blank = 0;
-            if !result.is_empty() {
-                result.push('\n');
+            if !first {
+                let blanks = consecutive_blank.min(2);
+                for _ in 0..=blanks {
+                    result.push('\n');
+                }
             }
+            first = false;
+            consecutive_blank = 0;
             result.push_str(line);
         }
     }

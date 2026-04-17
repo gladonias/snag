@@ -46,9 +46,8 @@ pub fn run() -> Result<CaptureResult, SnagError> {
     let rule = MatchRule::new_signal(REQUEST_IFACE, "Response").with_path(request_path.clone());
     conn.add_match(rule, move |_: (), _conn, msg: &dbus::Message| {
         let response = parse_response(msg);
-        if let Ok(mut lock) = result_clone.lock() {
-            *lock = Some(response);
-        }
+        let mut lock = result_clone.lock().unwrap_or_else(|e| e.into_inner());
+        *lock = Some(response);
         true
     })
     .map_err(|e| SnagError::PortalError(e.to_string()))?;
@@ -81,7 +80,8 @@ pub fn run() -> Result<CaptureResult, SnagError> {
         conn.process(remaining.min(Duration::from_millis(200)))
             .map_err(|e| SnagError::PortalError(e.to_string()))?;
 
-        if let Ok(lock) = result.lock() {
+        {
+            let lock = result.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(ref response) = *lock {
                 return match response {
                     PortalResponse::Success(uri) => decode_screenshot(uri),

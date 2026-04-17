@@ -6,12 +6,13 @@
 
 use crate::capture::CaptureResult;
 use crate::error::SnagError;
+use std::collections::HashMap;
 use std::os::unix::io::AsFd;
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
     wl_shm_pool, wl_surface,
 };
-use wayland_client::{delegate_noop, Connection, Dispatch, QueueHandle, WEnum};
+use wayland_client::{delegate_noop, Connection, Dispatch, Proxy, QueueHandle, WEnum};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
@@ -64,20 +65,17 @@ pub fn run() -> Result<CaptureResult, SnagError> {
         .roundtrip(&mut state)
         .map_err(|e| SnagError::WaylandError(e.to_string()))?;
 
-    // Use first output dimensions (or fallback)
-    let (out_width, out_height) = state.output_size.unwrap_or((1920, 1080));
-
-    // Create the overlay surface
+    // Create the overlay surface on the focused output
     let surface = compositor.create_surface(&qh, ());
     let layer_surface = layer_shell.get_layer_surface(
         &surface,
-        Some(&state.outputs[0]),
+        None,
         zwlr_layer_shell_v1::Layer::Overlay,
         "snag".into(),
         &qh,
         (),
     );
-    layer_surface.set_size(out_width, out_height);
+    layer_surface.set_size(0, 0);
     layer_surface.set_anchor(
         zwlr_layer_surface_v1::Anchor::Top
             | zwlr_layer_surface_v1::Anchor::Bottom
@@ -92,8 +90,6 @@ pub fn run() -> Result<CaptureResult, SnagError> {
     state.surface = Some(surface.clone());
     state.layer_surface = Some(layer_surface);
     state.shm = Some(shm);
-    state.overlay_width = out_width;
-    state.overlay_height = out_height;
 
     // Wait for configure
     while !state.configured {
@@ -144,15 +140,29 @@ pub fn run() -> Result<CaptureResult, SnagError> {
         .as_ref()
         .ok_or(SnagError::ProtocolUnsupported)?
         .clone();
-    let output = state.outputs[0].clone();
+    let output = state.outputs.get(state.active_output_idx)
+        .or_else(|| state.outputs.first())
+        .ok_or_else(|| SnagError::WaylandError("No outputs found".into()))?
+        .clone();
+
+    // Scale selection coordinates from logical to physical pixels
+    let scale = state.output_scales
+        .get(&output.id().protocol_id())
+        .copied()
+        .unwrap_or(1)
+        .max(1);
+    let phys_x = sel_x * scale;
+    let phys_y = sel_y * scale;
+    let phys_w = sel_w as i32 * scale;
+    let phys_h = sel_h as i32 * scale;
 
     let frame = screencopy_manager.capture_output_region(
         0,
         &output,
-        sel_x,
-        sel_y,
-        sel_w as i32,
-        sel_h as i32,
+        phys_x,
+        phys_y,
+        phys_w,
+        phys_h,
         &qh,
         (),
     );
@@ -467,7 +477,9 @@ struct State {
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     screencopy_manager: Option<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1>,
     outputs: Vec<wl_output::WlOutput>,
-    output_size: Option<(u32, u32)>,
+    output_sizes: HashMap<u32, (u32, u32)>,
+    output_scales: HashMap<u32, i32>,
+    active_output_idx: usize,
 
     // Overlay state
     surface: Option<wl_surface::WlSurface>,
@@ -505,7 +517,9 @@ impl State {
             layer_shell: None,
             screencopy_manager: None,
             outputs: Vec::new(),
-            output_size: None,
+            output_sizes: HashMap::new(),
+            output_scales: HashMap::new(),
+            active_output_idx: 0,
             surface: None,
             layer_surface: None,
             configured: false,
@@ -598,21 +612,44 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
 impl Dispatch<wl_output::WlOutput, ()> for State {
     fn event(
         state: &mut Self,
-        _: &wl_output::WlOutput,
+        output: &wl_output::WlOutput,
         event: wl_output::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_output::Event::Mode {
-            width,
-            height,
-            flags: WEnum::Value(flags),
-            ..
-        } = event
-        {
-            if flags.contains(wl_output::Mode::Current) {
-                state.output_size = Some((width as u32, height as u32));
+        let id = output.id().protocol_id();
+        match event {
+            wl_output::Event::Mode {
+                width,
+                height,
+                flags: WEnum::Value(flags),
+                ..
+            } => {
+                if flags.contains(wl_output::Mode::Current) {
+                    state.output_sizes.insert(id, (width as u32, height as u32));
+                }
+            }
+            wl_output::Event::Scale { factor } => {
+                state.output_scales.insert(id, factor);
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_surface::WlSurface, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &wl_surface::WlSurface,
+        event: wl_surface::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_surface::Event::Enter { output } = event {
+            if let Some(idx) = state.outputs.iter().position(|o| o == &output) {
+                state.active_output_idx = idx;
             }
         }
     }
@@ -785,7 +822,6 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, ()> for State {
 
 // Noop dispatch for types we don't handle events on
 delegate_noop!(State: ignore wl_compositor::WlCompositor);
-delegate_noop!(State: ignore wl_surface::WlSurface);
 delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore wl_buffer::WlBuffer);
