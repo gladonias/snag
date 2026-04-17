@@ -172,6 +172,10 @@ Combine multiple languages (useful for mixed-language documents):
 snag -l deu+eng
 ```
 
+## Disclaimer
+
+This project is built with the assistance of an AI assistant.
+
 ## License
 
 [AGPL-3.0](LICENSE)
